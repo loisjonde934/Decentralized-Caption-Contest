@@ -175,3 +175,79 @@
 (define-read-only (get-total-captions)
   (- (var-get next-caption-id) u1)
 )
+
+
+(define-map user-profiles
+  { user: principal }
+  {
+    total-captions: uint,
+    total-wins: uint,
+    total-earnings: uint,
+    first-contest-block: uint,
+    last-activity-block: uint
+  }
+)
+
+(define-map user-captions
+  { user: principal, index: uint }
+  {
+    caption-id: uint,
+    contest-id: uint,
+    submission-block: uint,
+    vote-count: uint,
+    is-winner: bool
+  }
+)
+
+(define-map user-caption-count
+  { user: principal }
+  { count: uint }
+)
+
+(define-private (update-user-profile (user principal) (caption-id uint) (contest-id uint))
+  (let ((current-profile (default-to 
+          { total-captions: u0, total-wins: u0, total-earnings: u0, 
+            first-contest-block: stacks-block-height, last-activity-block: stacks-block-height }
+          (map-get? user-profiles { user: user })))
+        (caption-count (default-to { count: u0 } (map-get? user-caption-count { user: user })))
+        (new-index (get count caption-count)))
+    (map-set user-profiles
+      { user: user }
+      (merge current-profile 
+        { total-captions: (+ (get total-captions current-profile) u1),
+          last-activity-block: stacks-block-height }))
+    (map-set user-captions
+      { user: user, index: new-index }
+      { caption-id: caption-id, contest-id: contest-id, 
+        submission-block: stacks-block-height, vote-count: u0, is-winner: false })
+    (map-set user-caption-count
+      { user: user }
+      { count: (+ new-index u1) })
+    (ok true)))
+
+(define-private (update-winner-profile (winner principal) (earnings uint))
+  (let ((current-profile (unwrap-panic (map-get? user-profiles { user: winner }))))
+    (map-set user-profiles
+      { user: winner }
+      (merge current-profile 
+        { total-wins: (+ (get total-wins current-profile) u1),
+          total-earnings: (+ (get total-earnings current-profile) earnings) }))
+    (ok true)))
+
+(define-read-only (get-user-profile (user principal))
+  (map-get? user-profiles { user: user }))
+
+(define-read-only (get-user-caption-history (user principal) (start-index uint) (count uint))
+  (list (map-get? user-captions { user: user, index: start-index })
+        (map-get? user-captions { user: user, index: (+ start-index u1) })
+        (map-get? user-captions { user: user, index: (+ start-index u2) })
+        (map-get? user-captions { user: user, index: (+ start-index u3) })
+        (map-get? user-captions { user: user, index: (+ start-index u4) })))
+
+(define-read-only (get-user-caption-at-index (user principal) (index uint))
+  (map-get? user-captions { user: user, index: index }))
+
+(define-read-only (get-user-stats (user principal))
+  (let ((profile (get-user-profile user))
+        (caption-count (default-to { count: u0 } (map-get? user-caption-count { user: user }))))
+    { profile: profile, total-submissions: (get count caption-count) }))
