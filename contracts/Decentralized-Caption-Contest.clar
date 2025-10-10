@@ -251,3 +251,92 @@
   (let ((profile (get-user-profile user))
         (caption-count (default-to { count: u0 } (map-get? user-caption-count { user: user }))))
     { profile: profile, total-submissions: (get count caption-count) }))
+
+
+(define-map user-reputation
+  { user: principal }
+  { 
+    total-votes-received: uint,
+    contests-participated: uint,
+    reputation-score: uint,
+    rank-tier: (string-ascii 16),
+    last-score-update: uint
+  }
+)
+
+(define-map global-rankings
+  { rank-position: uint }
+  { user: principal, score: uint }
+)
+
+(define-data-var total-ranked-users uint u0)
+
+(define-private (calculate-reputation-score (wins uint) (total-votes uint) (participations uint))
+  (+ (* wins u100) (* total-votes u5) participations)
+)
+
+(define-private (determine-rank-tier (score uint))
+  (if (>= score u1000)
+    "Legend"
+    (if (>= score u500)
+      "Master"
+      (if (>= score u200)
+        "Expert"
+        (if (>= score u50)
+          "Rising Star"
+          "Beginner"
+        )
+      )
+    )
+  )
+)
+
+(define-private (update-user-reputation-on-vote (author principal))
+  (let ((current-rep (default-to 
+          { total-votes-received: u0, contests-participated: u0, 
+            reputation-score: u0, rank-tier: "Beginner", last-score-update: u0 }
+          (map-get? user-reputation { user: author })))
+        (new-votes (+ (get total-votes-received current-rep) u1)))
+    (map-set user-reputation
+      { user: author }
+      (merge current-rep 
+        { total-votes-received: new-votes,
+          last-score-update: stacks-block-height }))
+    true
+  )
+)
+
+(define-private (finalize-user-reputation (winner principal) (total-wins uint) (total-votes uint))
+  (let ((current-rep (default-to 
+          { total-votes-received: u0, contests-participated: u0, 
+            reputation-score: u0, rank-tier: "Beginner", last-score-update: u0 }
+          (map-get? user-reputation { user: winner })))
+        (new-score (calculate-reputation-score total-wins total-votes (get contests-participated current-rep))))
+    (map-set user-reputation
+      { user: winner }
+      { total-votes-received: total-votes,
+        contests-participated: (+ (get contests-participated current-rep) u1),
+        reputation-score: new-score,
+        rank-tier: (determine-rank-tier new-score),
+        last-score-update: stacks-block-height })
+    true
+  )
+)
+
+(define-read-only (get-user-reputation (user principal))
+  (map-get? user-reputation { user: user })
+)
+
+(define-read-only (get-leaderboard-entry (rank-position uint))
+  (map-get? global-rankings { rank-position: rank-position })
+)
+
+(define-read-only (get-top-users)
+  (list 
+    (map-get? global-rankings { rank-position: u1 })
+    (map-get? global-rankings { rank-position: u2 })
+    (map-get? global-rankings { rank-position: u3 })
+    (map-get? global-rankings { rank-position: u4 })
+    (map-get? global-rankings { rank-position: u5 })
+  )
+)
