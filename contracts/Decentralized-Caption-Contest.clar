@@ -340,3 +340,68 @@
     (map-get? global-rankings { rank-position: u5 })
   )
 )
+
+
+(define-constant ERR-INVALID-BOOST-AMOUNT (err u107))
+
+(define-map contest-boosts
+  { contest-id: uint }
+  {
+    total-boosted-amount: uint,
+    boost-count: uint,
+    unique-boosters: uint,
+    creator-bonus: uint,
+    viral-score: uint
+  }
+)
+
+(define-map user-boost-history
+  { booster: principal, contest-id: uint }
+  {
+    total-boosted: uint,
+    boost-timestamp: uint
+  }
+)
+
+(define-public (boost-contest (contest-id uint) (boost-amount uint))
+  (let ((contest (unwrap! (map-get? contests { contest-id: contest-id }) ERR-CONTEST-NOT-FOUND))
+        (current-boosts (default-to 
+          { total-boosted-amount: u0, boost-count: u0, unique-boosters: u0, creator-bonus: u0, viral-score: u0 }
+          (map-get? contest-boosts { contest-id: contest-id })))
+        (user-boost (map-get? user-boost-history { booster: tx-sender, contest-id: contest-id }))
+        (is-new-booster (is-none user-boost))
+        (creator-share (/ (* boost-amount u10) u100)))
+    (asserts! (> boost-amount u0) ERR-INVALID-BOOST-AMOUNT)
+    (asserts! (get is-active contest) ERR-CONTEST-ENDED)
+    (asserts! (< stacks-block-height (get end-block contest)) ERR-CONTEST-ENDED)
+    (let ((new-prize (+ (get prize-amount contest) (- boost-amount creator-share))))
+      (try! (stx-transfer? boost-amount tx-sender (as-contract tx-sender)))
+      (map-set contests
+        { contest-id: contest-id }
+        (merge contest { prize-amount: new-prize }))
+      (map-set contest-boosts
+        { contest-id: contest-id }
+        { total-boosted-amount: (+ (get total-boosted-amount current-boosts) boost-amount),
+          boost-count: (+ (get boost-count current-boosts) u1),
+          unique-boosters: (if is-new-booster (+ (get unique-boosters current-boosts) u1) (get unique-boosters current-boosts)),
+          creator-bonus: (+ (get creator-bonus current-boosts) creator-share),
+          viral-score: (+ (* (get boost-count current-boosts) u10) (get unique-boosters current-boosts)) })
+      (map-set user-boost-history
+        { booster: tx-sender, contest-id: contest-id }
+        { total-boosted: (+ (match user-boost some-boost (get total-boosted some-boost) u0) boost-amount),
+          boost-timestamp: stacks-block-height })
+      (ok { new-prize-pool: new-prize, creator-bonus: creator-share }))))
+
+(define-read-only (get-contest-boost-stats (contest-id uint))
+  (map-get? contest-boosts { contest-id: contest-id }))
+
+(define-read-only (get-user-boost-for-contest (booster principal) (contest-id uint))
+  (map-get? user-boost-history { booster: booster, contest-id: contest-id }))
+
+(define-read-only (get-viral-contests)
+  (list 
+    (get-contest-boost-stats u1)
+    (get-contest-boost-stats u2)
+    (get-contest-boost-stats u3)
+    (get-contest-boost-stats u4)
+    (get-contest-boost-stats u5)))
